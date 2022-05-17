@@ -51,11 +51,9 @@ https://drive.google.com/file/d/1C2t1YdkosA4xXuk-5HsbFwavd7_s3-Uf/view?usp=shari
 #Unzip the file by running the command below
 sudo tar xvf home-oracle-oci-folder_backup.tar.gz -C /home
 
-
 # Update the SO - (on both nodes)
 yum update -y
 reboot
-
 
 #Installing the packages... - (on both nodes)
 sudo yum install pacemaker pcs sbd fence-agents-all resource-agents -y
@@ -75,14 +73,12 @@ systemctl enable pcsd
 systemctl start pcsd
 systemctl enable pacemaker
 
-
 #Creating the cluster
 pcs host auth node1 node2 -u hacluster
 pcs cluster setup linuxcluster --start node1 node2
 pcs cluster start --all
 pcs cluster enable --all
 pcs status
-
 
 # View Configuration of the Cluster on both nodes
 cat /etc/corosync/corosync.conf
@@ -98,11 +94,9 @@ sda                  8:0    0 46.6G  0 disk
   └─ocivolume-oled 252:1    0   10G  0 lvm  /var/oled
 sdb                  8:16   0   50G  0 disk
 
-
 #Create a partition and format the them
 fdisk /dev/sdb
 mkfs.xfs /dev/sdb1 -f -L quorum
-
 
 [root@node1 oracle-cli]# ls -lha /dev/disk/by-id/
 total 0
@@ -126,14 +120,12 @@ lrwxrwxrwx. 1 root root  10 May 10 23:30 wwn-0x602d986e468947bfa8d88b2cd0271af0-
 lrwxrwxrwx. 1 root root  10 May 10 23:30 wwn-0x602d986e468947bfa8d88b2cd0271af0-part2 -> ../../sda2
 lrwxrwxrwx. 1 root root  10 May 10 23:30 wwn-0x602d986e468947bfa8d88b2cd0271af0-part3 -> ../../sda3
 
-
 # Format the SBD quorum disk
 sbd -d /dev/disk/by-id/wwn-0x60286decda6b4f1c9c6c7f18adc0a696-part1 create
 sbd -d /dev/disk/by-id/wwn-0x60286decda6b4f1c9c6c7f18adc0a696-part1 dump
 
 sbd -d /dev/disk/by-id/wwn-0x6047431bb3a9451ea9385e2e78efa578 create
 sbd -d /dev/disk/by-id/wwn-0x6047431bb3a9451ea9385e2e78efa578 dump
-
 
 [root@node1 oracle-cli]# sbd -d /dev/disk/by-id/wwn-0x6047431bb3a9451ea9385e2e78efa578 dump
 ==Dumping header on disk /dev/disk/by-id/wwn-0x6047431bb3a9451ea9385e2e78efa578
@@ -147,29 +139,24 @@ Timeout (loop)     : 1
 Timeout (msgwait)  : 10
 ==Header on disk /dev/disk/by-id/wwn-0x6047431bb3a9451ea9385e2e78efa578 is dumped
 
-
 # Enable monitoring - (on both nodes)
 modprobe softdog
 echo softdog > /etc/modules-load.d/softdog.conf
-
 
 #Edit SBD configuration file - (ambos os nodes)
 vi /etc/sysconfig/sbd
 SBD_DEVICE="/dev/disk/by-id/wwn-0x6047431bb3a9451ea9385e2e78efa578"
 SBD_OPTS="-W"
 
-
 #Enable SBD
 systemctl enable sbd - (ambos os nodes)
 pcs cluster start --all
-
 
 # Adding properties to the cluster
 pcs property set no-quorum-policy=ignore
 pcs property set stonith-enabled=true
 pcs property set stonith-timeout=60s
 pcs property set stonith-watchdog-timeout=0
-
 
 #List all SBD devices
 sbd -d /dev/disk/by-id/wwn-0x60286decda6b4f1c9c6c7f18adc0a696-part1 list
@@ -191,11 +178,9 @@ pcs constraint location fence-sbd-node1 prefers node2=0
 pcs constraint location fence-sbd-node2 prefers node1=0
 pcs constraint location fence-sbd-node2 prefers node2="-INFINITY"
 
-
 #Do the test fencing the centos-1 (will reboot)
 pcs stonith fence node1
 pcs stonith history cleanup
-
 
 #Create the disk resources in the cluster
 mkdir -p /SQL_DATA /SQL_LOG /var/opt/mssql/data
@@ -208,7 +193,6 @@ sudo pcs resource create VIP ocf:heartbeat:IPaddr2 ip=10.0.0.200 nic=ens3 cidr_n
 
 #Moving resources
 pcs resource move SQL-CLUSTER centos-2
-
 
 #Creating the script the alert uses to move the VIP
 #Create the script below in the directory - vi /var/lib/pacemaker/ip_move.sh
@@ -244,7 +228,6 @@ chmod 600 /var/log/pacemaker_ip_move.log
 pcs alert create id=ip_move description="Move IP address using oci-cli" path=/var/lib/pacemaker/ip_move.sh
 pcs alert recipient add ip_move id=logfile_ip_move value=/var/log/pacemaker_ip_move.log
 
-
 #Checking existing alerts
 [root@nfs-server-1 log]# pcs alert show
 Alerts:
@@ -253,7 +236,6 @@ Alerts:
   Recipients:
    Recipient: logfile_ip_move (value=/var/log/pacemaker_ip_move.log)
 [root@nfs-server-1 log]#
-
 
 #Edit the /home/oracle-cli/env_variables.sh file (on both nodes)
 
@@ -281,7 +263,6 @@ TARGET_VIP="10.100.20.200"
 node1vnic="ocid1.vnic.oc1.uk-london-1.abwgiljtusvznyxhvysugqjreqplohqwsjc3hjtl37bjidxdryw2uljdjiia"
 node2vnic="ocid1.vnic.oc1.uk-london-1.abwgiljtlb4fr5wwoj5qgnh3tpp2udjqbzp7gzyzc5rkqmykmlao5esuj4fq"
 
-
 #################################
 Important commands:
 pcs constraint
@@ -290,8 +271,6 @@ pcs resource clear SQL-CLUSTER
 pcs constraint
 
 obs.: move a resource run clean to remove the created constraint
-
-
 
 ###################################################################################################
 Quickstart: Install SQL Server and create a database on Red Hat
@@ -322,7 +301,6 @@ cd
 echo 'export PATH="$PATH:/opt/mssql-tools/bin"' >> ~/.bash_profile
 echo 'export PATH="$PATH:/opt/mssql-tools/bin"' >> ~/.bashrc
 source ~/.bashrc
-
 
 ###################################################################################################
 Configure failover cluster instance - SQL Server on Linux (RHEL)
