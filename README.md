@@ -239,6 +239,7 @@ fi
 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 chmod +x /var/lib/pacemaker/ip_move.sh
 
+
 #Creating the alert to move the VIP
 touch /var/log/pacemaker_ip_move.log
 chown hacluster:haclient /var/log/pacemaker_ip_move.log
