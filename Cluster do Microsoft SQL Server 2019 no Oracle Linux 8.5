@@ -1,0 +1,411 @@
+###########################################################################################################
+IIIIIIIIII   NNNNNNNN        NNNNNNNN   IIIIIIIIII         CCCCCCCCCCCCC   IIIIIIIIII        OOOOOOOOO
+I::::::::I   N:::::::N       N::::::N   I::::::::I      CCC::::::::::::C   I::::::::I      OO:::::::::OO
+I::::::::I   N::::::::N      N::::::N   I::::::::I    CC:::::::::::::::C   I::::::::I    OO:::::::::::::OO
+II::::::II   N:::::::::N     N::::::N   II::::::II   C:::::CCCCCCCC::::C   II::::::II   O:::::::OOO:::::::O
+  I::::I     N::::::::::N    N::::::N     I::::I    C:::::C       CCCCCC     I::::I     O::::::O   O::::::O
+  I::::I     N:::::::::::N   N::::::N     I::::I   C:::::C                   I::::I     O:::::O     O:::::O
+  I::::I     N:::::::N::::N  N::::::N     I::::I   C:::::C                   I::::I     O:::::O     O:::::O
+  I::::I     N::::::N N::::N N::::::N     I::::I   C:::::C                   I::::I     O:::::O     O:::::O
+  I::::I     N::::::N  N::::N:::::::N     I::::I   C:::::C                   I::::I     O:::::O     O:::::O
+  I::::I     N::::::N   N:::::::::::N     I::::I   C:::::C                   I::::I     O:::::O     O:::::O
+  I::::I     N::::::N    N::::::::::N     I::::I   C:::::C                   I::::I     O:::::O     O:::::O
+  I::::I     N::::::N     N:::::::::N     I::::I    C:::::C       CCCCCC     I::::I     O::::::O   O::::::O
+II::::::II   N::::::N      N::::::::N   II::::::II   C:::::CCCCCCCC::::C   II::::::II   O:::::::OOO:::::::O
+I::::::::I   N::::::N       N:::::::N   I::::::::I    CC:::::::::::::::C   I::::::::I    OO:::::::::::::OO
+I::::::::I   N::::::N        N::::::N   I::::::::I      CCC::::::::::::C   I::::::::I      OO:::::::::OO
+IIIIIIIIII   NNNNNNNN         NNNNNNN   IIIIIIIIII         CCCCCCCCCCCCC   IIIIIIIIII        OOOOOOOOO
+###########################################################################################################
+
+Step by Step
+
+#Create a Dynamic Group Called SQLHA
+ANY {instance.compartment.id = 'ocid1.compartment.oc1..aaaaaaaaebrh6z4i6axai762hybutocjnexn53nvkta7jbrwuabyyisrq3za'}
+
+#Create a policy "SQLHA-Policy" to allow Instance Principal to execute commands into OCI
+Allow dynamic-group SQLHA to use private-ips in compartment id ocid1.compartment.oc1..aaaaaaaaiswgb4rgbugrhmp2qozsqwefsfpefi7nstrvanpmc7ajjp5r4bhq
+Allow dynamic-group SQLHA to use vnics in compartment id ocid1.compartment.oc1..aaaaaaaaiswgb4rgbugrhmp2qozsqwefsfpefi7nstrvanpmc7ajjp5r4bhq
+Allow dynamic-group SQLHA to use subnets in compartment id ocid1.compartment.oc1..aaaaaaaaiswgb4rgbugrhmp2qozsqwefsfpefi7nstrvanpmc7ajjp5r4bhq
+
+#Create 2 virtual machines Oracle Linux 8
+Shape: VM.Standard.E4.Flex com 1 ocpu e 16G de Memória
+
+#Edit the file authorized_keys and remove some characters from beginning to allow root login
+vi .ssh/authorized_keys
+
+#Create the Disks below but only associate at this moment only the quorum disk:
+- quorum-disk -> 50G - 10VPU
+- master-disk -> 100G - 10VPU
+- SQL_Data -> 1T - 20VPU
+- SQL_Log -> 500G - 20VPU
+
+obs.: mount paying attention to configure as Read/write - shareable!!!!
+Go to the console and copy the commands to add the disk in the operating system
+
+#Install OCI CLI
+#######################################################################################
+IMPORTANT !!!!! COPY the file home-oracle-oci-folder_backup.tar AND DESCOMPACT THEM
+https://drive.google.com/file/d/1C2t1YdkosA4xXuk-5HsbFwavd7_s3-Uf/view?usp=sharing
+#######################################################################################
+
+#Unzip the file by running the command below
+sudo tar xvf home-oracle-oci-folder_backup.tar.gz -C /home
+
+
+# Update the SO - (on both nodes)
+yum update -y
+reboot
+
+
+#Installing the packages... - (on both nodes)
+sudo yum install pacemaker pcs sbd fence-agents-all resource-agents -y
+--- To see if user is created
+sudo tail /etc/passwd
+sudo passwd hacluster
+
+# Disable SELINUX and Firewall - (on both nodes)
+sed -i s/^SELINUX=.*$/SELINUX=disabled/ /etc/selinux/config
+setenforce 0
+systemctl stop firewalld
+systemctl disable firewalld
+
+
+#Activate the cluster and leave it enabled - (on both nodes)
+systemctl enable pcsd
+systemctl start pcsd
+systemctl enable pacemaker
+
+
+#Creating the cluster
+pcs host auth node1 node2 -u hacluster
+pcs cluster setup linuxcluster --start node1 node2
+pcs cluster start --all
+pcs cluster enable --all
+pcs status
+
+
+# View Configuration of the Cluster on both nodes
+cat /etc/corosync/corosync.conf
+
+# Identify the disks in the directory /dev/disk/by-id
+[root@node1 oracle-cli]# lsblk
+NAME               MAJ:MIN RM  SIZE RO TYPE MOUNTPOINT
+sda                  8:0    0 46.6G  0 disk
+├─sda1               8:1    0  100M  0 part /boot/efi
+├─sda2               8:2    0    1G  0 part /boot
+└─sda3               8:3    0 45.5G  0 part
+  ├─ocivolume-root 252:0    0 35.5G  0 lvm  /
+  └─ocivolume-oled 252:1    0   10G  0 lvm  /var/oled
+sdb                  8:16   0   50G  0 disk
+
+
+#Create a partition and format the them
+fdisk /dev/sdb
+mkfs.xfs /dev/sdb1 -f -L quorum
+
+
+[root@node1 oracle-cli]# ls -lha /dev/disk/by-id/
+total 0
+drwxr-xr-x. 2 root root 380 May 10 23:30 .
+drwxr-xr-x. 8 root root 160 May 10 23:49 ..
+lrwxrwxrwx. 1 root root  10 May 10 23:30 dm-name-ocivolume-oled -> ../../dm-1
+lrwxrwxrwx. 1 root root  10 May 10 23:30 dm-name-ocivolume-root -> ../../dm-0
+lrwxrwxrwx. 1 root root  10 May 10 23:30 dm-uuid-LVM-2IUA6dV1GVkmmWI7uQaVfKJLpdAdmymI4TyjHMuBwdXE8zeuHheeJJB2jtYPXfb9 -> ../../dm-1
+lrwxrwxrwx. 1 root root  10 May 10 23:30 dm-uuid-LVM-2IUA6dV1GVkmmWI7uQaVfKJLpdAdmymILpfYr0oDsf4LXaH4PyNtiPR7pzajLw72 -> ../../dm-0
+lrwxrwxrwx. 1 root root  10 May 10 23:30 lvm-pv-uuid-fqxSxn-Sc18-vlIB-bciV-hrBY-zWhA-IWOo58 -> ../../sda3
+lrwxrwxrwx. 1 root root   9 May 10 23:30 scsi-360286decda6b4f1c9c6c7f18adc0a696 -> ../../sdb
+lrwxrwxrwx. 1 root root  10 May 10 23:49 scsi-360286decda6b4f1c9c6c7f18adc0a696-part1 -> ../../sdb1
+lrwxrwxrwx. 1 root root   9 May 10 23:30 scsi-3602d986e468947bfa8d88b2cd0271af0 -> ../../sda
+lrwxrwxrwx. 1 root root  10 May 10 23:30 scsi-3602d986e468947bfa8d88b2cd0271af0-part1 -> ../../sda1
+lrwxrwxrwx. 1 root root  10 May 10 23:30 scsi-3602d986e468947bfa8d88b2cd0271af0-part2 -> ../../sda2
+lrwxrwxrwx. 1 root root  10 May 10 23:30 scsi-3602d986e468947bfa8d88b2cd0271af0-part3 -> ../../sda3
+lrwxrwxrwx. 1 root root   9 May 10 23:30 wwn-0x60286decda6b4f1c9c6c7f18adc0a696 -> ../../sdb
+lrwxrwxrwx. 1 root root  10 May 10 23:49 wwn-0x60286decda6b4f1c9c6c7f18adc0a696-part1 -> ../../sdb1
+lrwxrwxrwx. 1 root root   9 May 10 23:30 wwn-0x602d986e468947bfa8d88b2cd0271af0 -> ../../sda
+lrwxrwxrwx. 1 root root  10 May 10 23:30 wwn-0x602d986e468947bfa8d88b2cd0271af0-part1 -> ../../sda1
+lrwxrwxrwx. 1 root root  10 May 10 23:30 wwn-0x602d986e468947bfa8d88b2cd0271af0-part2 -> ../../sda2
+lrwxrwxrwx. 1 root root  10 May 10 23:30 wwn-0x602d986e468947bfa8d88b2cd0271af0-part3 -> ../../sda3
+
+
+# Format the SBD quorum disk
+sbd -d /dev/disk/by-id/wwn-0x60286decda6b4f1c9c6c7f18adc0a696-part1 create
+sbd -d /dev/disk/by-id/wwn-0x60286decda6b4f1c9c6c7f18adc0a696-part1 dump
+
+sbd -d /dev/disk/by-id/wwn-0x6047431bb3a9451ea9385e2e78efa578 create
+sbd -d /dev/disk/by-id/wwn-0x6047431bb3a9451ea9385e2e78efa578 dump
+
+
+[root@node1 oracle-cli]# sbd -d /dev/disk/by-id/wwn-0x6047431bb3a9451ea9385e2e78efa578 dump
+==Dumping header on disk /dev/disk/by-id/wwn-0x6047431bb3a9451ea9385e2e78efa578
+Header version     : 2.1
+UUID               : e8e2e700-3566-4adf-be7b-06f6a35a68a1
+Number of slots    : 255
+Sector size        : 512
+Timeout (watchdog) : 5
+Timeout (allocate) : 2
+Timeout (loop)     : 1
+Timeout (msgwait)  : 10
+==Header on disk /dev/disk/by-id/wwn-0x6047431bb3a9451ea9385e2e78efa578 is dumped
+
+
+# Enable monitoring - (on both nodes)
+modprobe softdog
+echo softdog > /etc/modules-load.d/softdog.conf
+
+
+#Edit SBD configuration file - (ambos os nodes)
+vi /etc/sysconfig/sbd
+SBD_DEVICE="/dev/disk/by-id/wwn-0x6047431bb3a9451ea9385e2e78efa578"
+SBD_OPTS="-W"
+
+
+#Enable SBD
+systemctl enable sbd - (ambos os nodes)
+pcs cluster start --all
+
+
+# Adding properties to the cluster
+pcs property set no-quorum-policy=ignore
+pcs property set stonith-enabled=true
+pcs property set stonith-timeout=60s
+pcs property set stonith-watchdog-timeout=0
+
+
+#List all SBD devices
+sbd -d /dev/disk/by-id/wwn-0x60286decda6b4f1c9c6c7f18adc0a696-part1 list
+[root@centos-1 oracleoci]# sbd -d /dev/disk/by-id/wwn-0x6047431bb3a9451ea9385e2e78efa578 list
+0       node1        clear
+1       node2        clear
+
+#Verify status do SBD device
+fence_sbd --devices=/dev/disk/by-id/wwn-0x6047431bb3a9451ea9385e2e78efa578 -n node1 -o status
+fence_sbd --devices=/dev/disk/by-id/wwn-0x6047431bb3a9451ea9385e2e78efa578 -n node2 -o status
+CAUTION - THE SERVER WILL RESTART
+fence_sbd --devices=/dev/disk/by-id/wwn-0x6031a9aefbf043dbb6fedce989925ba8 -n centos-1 -o reboot
+
+#Creating the Fencing device using SBD
+pcs stonith create fence-sbd-node1 fence_sbd devices=/dev/disk/by-id/wwn-0x6047431bb3a9451ea9385e2e78efa578 pcmk_host_list="node1 node2" pcmk_delay_base="0" power_timeout="45"
+pcs stonith create fence-sbd-node2 fence_sbd devices=/dev/disk/by-id/wwn-0x6047431bb3a9451ea9385e2e78efa578 pcmk_host_list="node1 node2" pcmk_delay_base="5" power_timeout="45"
+pcs constraint location fence-sbd-node1 prefers node1="-INFINITY"
+pcs constraint location fence-sbd-node1 prefers node2=0
+pcs constraint location fence-sbd-node2 prefers node1=0
+pcs constraint location fence-sbd-node2 prefers node2="-INFINITY"
+
+
+#Do the test fencing the centos-1 (will reboot)
+pcs stonith fence node1
+pcs stonith history cleanup
+
+
+#Create the disk resources in the cluster
+mkdir -p /SQL_DATA /SQL_LOG /var/opt/mssql/data
+pcs resource create SQL_MASTER Filesystem device="/dev/disk/by-id/wwn-0x602f2f46ec814830805c18f6e6ab0108-part1" directory="/var/opt/mssql/data" fstype="ext4" --group SQL-CLUSTER
+pcs resource create SQL_DATA Filesystem device="/dev/disk/by-id/wwn-0x60ed6a86eadb4ad7a7ff1dc31c571e9a-part1" directory="/SQL_DATA" fstype="ext4" --group SQL-CLUSTER
+pcs resource create SQL_LOG Filesystem device="/dev/disk/by-id/wwn-0x6058209df5f6452c9bdc6761bc6c458b-part1" directory="/SQL_LOG" fstype="ext4" --group SQL-CLUSTER
+
+#Create the VIP IP in the cluster
+sudo pcs resource create VIP ocf:heartbeat:IPaddr2 ip=10.0.0.200 nic=ens3 cidr_netmask=24 --group SQL-CLUSTER
+
+#Moving resources
+pcs resource move SQL-CLUSTER centos-2
+
+
+#Creating the script the alert uses to move the VIP
+#Create the script below in the directory - vi /var/lib/pacemaker/ip_move.sh
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#!/bin/sh
+set -x
+echo "FINDME-ip_move.sh"
+if [ -z $CRM_alert_version ]; then
+    echo "$0 must be run by Pacemaker version 1.1.15 or later"
+    exit 0
+fi
+
+if [ "${CRM_alert_kind}" = "resource" -a "${CRM_alert_target_rc}" = "0" -a "${CRM_alert_task}" = "start" -a "${CRM_alert_rsc}" = "VIP" ]
+then
+    tstamp="$CRM_alert_timestamp: "
+    echo "${tstamp}Moving IP" >> "${CRM_alert_recipient}"
+    /home/oracle-cli/move_secip.sh >> "${CRM_alert_recipient}" 2>> "${CRM_alert_recipient}"
+    if [ $? -eq 0 ]; then
+      exit 0
+    else
+      exit 1
+    fi
+fi
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+chmod +x /var/lib/pacemaker/ip_move.sh
+
+#Creating the alert to move the VIP
+touch /var/log/pacemaker_ip_move.log
+chown hacluster:haclient /var/log/pacemaker_ip_move.log
+chmod 600 /var/log/pacemaker_ip_move.log
+
+#create the alert on only 1 server
+pcs alert create id=ip_move description="Move IP address using oci-cli" path=/var/lib/pacemaker/ip_move.sh
+pcs alert recipient add ip_move id=logfile_ip_move value=/var/log/pacemaker_ip_move.log
+
+
+#Checking existing alerts
+[root@nfs-server-1 log]# pcs alert show
+Alerts:
+ Alert: ip_move (path=/var/lib/pacemaker/ip_move.sh)
+  Description: Move IP address using oci-cli
+  Recipients:
+   Recipient: logfile_ip_move (value=/var/log/pacemaker_ip_move.log)
+[root@nfs-server-1 log]#
+
+
+#Edit the /home/oracle-cli/env_variables.sh file (on both nodes)
+
+LOCAL_NODE="centos-11"
+LOCAL_NODE_IP="10.100.20.176"
+NODE1="centos-11"
+NODE2="centos-22"
+NODE1_IP="10.100.20.176"
+NODE2_IP="10.100.20.96"
+NODE1_FQDN="centos-11.subpublic.vcnlon.oraclevcn.com"
+NODE2_FQDN="centos-22.subpublic.vcnlon.oraclevcn.com"
+TARGET_VIP="10.100.20.200"
+node1vnic="ocid1.vnic.oc1.uk-london-1.abwgiljtusvznyxhvysugqjreqplohqwsjc3hjtl37bjidxdryw2uljdjiia"
+node2vnic="ocid1.vnic.oc1.uk-london-1.abwgiljtlb4fr5wwoj5qgnh3tpp2udjqbzp7gzyzc5rkqmykmlao5esuj4fq"
+
+LOCAL_NODE="centos-22"
+LOCAL_NODE_IP="10.100.20.96"
+NODE1="centos-11"
+NODE2="centos-22"
+NODE1_IP="10.100.20.176"
+NODE2_IP="10.100.20.96"
+NODE1_FQDN="centos-11.subpublic.vcnlon.oraclevcn.com"
+NODE2_FQDN="centos-22.subpublic.vcnlon.oraclevcn.com"
+TARGET_VIP="10.100.20.200"
+node1vnic="ocid1.vnic.oc1.uk-london-1.abwgiljtusvznyxhvysugqjreqplohqwsjc3hjtl37bjidxdryw2uljdjiia"
+node2vnic="ocid1.vnic.oc1.uk-london-1.abwgiljtlb4fr5wwoj5qgnh3tpp2udjqbzp7gzyzc5rkqmykmlao5esuj4fq"
+
+
+#################################
+Important commands:
+pcs constraint
+pcs resource move SQL-CLUSTER
+pcs resource clear SQL-CLUSTER
+pcs constraint
+
+obs.: move a resource run clean to remove the created constraint
+
+
+
+###################################################################################################
+Quickstart: Install SQL Server and create a database on Red Hat
+https://docs.microsoft.com/en-us/sql/linux/quickstart-install-connect-red-hat?view=sql-server-ver15
+###################################################################################################
+
+#Download the Microsoft SQL Server 2019 Red Hat repository configuration file:
+sudo curl -o /etc/yum.repos.d/mssql-server.repo https://packages.microsoft.com/config/rhel/8/mssql-server-2019.repo
+
+#Run the following commands to install SQL Server:
+sudo yum install -y mssql-server
+
+#After the package installation finishes, run mssql-conf setup and follow the prompts to set the SA password and choose your edition.
+sudo /opt/mssql/bin/mssql-conf setup
+
+#Once the configuration is done, verify that the service is running:
+systemctl status mssql-server
+
+#Install the SQL Server command-line tools
+sudo curl -o /etc/yum.repos.d/msprod.repo https://packages.microsoft.com/config/rhel/8/prod.repo
+
+#Run the following commands to install mssql-tools with the unixODBC developer package
+sudo yum install -y mssql-tools unixODBC-devel
+
+#For convenience, add /opt/mssql-tools/bin/ to your PATH environment variable
+su - mssql
+cd
+echo 'export PATH="$PATH:/opt/mssql-tools/bin"' >> ~/.bash_profile
+echo 'export PATH="$PATH:/opt/mssql-tools/bin"' >> ~/.bashrc
+source ~/.bashrc
+
+
+###################################################################################################
+Configure failover cluster instance - SQL Server on Linux (RHEL)
+https://docs.microsoft.com/en-us/sql/linux/sql-server-linux-shared-disk-cluster-configure?view=sql-server-ver15
+###################################################################################################
+
+#Designate one node as primary and the other as secondary, for purposes of configuration. Use these terms for the following this guide.
+#On the secondary node, stop and disable SQL Server. The following example stops and disables SQL Server:
+sudo systemctl stop mssql-server
+sudo systemctl disable mssql-server
+
+#At set up time, a Server Master Key is generated for the SQL Server instance and placed at /var/opt/mssql/secrets/machine-key. On Linux, SQL Server always runs as a local account called mssql. Because it's a local account, its identity isn't shared across nodes. Therefore, you need to copy the encryption key from primary node to each secondary node so each local mssql account can access it to decrypt the Server Master Key.
+# Copy machine-key file from primary to secondary
+# Change the owner
+chown mssql.mssql machine-key
+
+#On the primary node, create a SQL server login for Pacemaker and grant the login permission to run sp_server_diagnostics. Pacemaker uses this account to verify which node is running SQL Server.
+sudo systemctl start mssql-server
+
+#Connect to the SQL Server master database with the sa account and run the following:
+su - mssql
+sqlcmd -Usa
+senha do SA
+
+USE master
+GO
+CREATE LOGIN PACEMAKER with PASSWORD= N'Oracle123'
+ALTER SERVER ROLE sysadmin ADD MEMBER PACEMAKER
+GO
+
+#On both cluster nodes, create a file to store the SQL Server username and password for the Pacemaker login.
+sudo -s
+sudo touch /var/opt/mssql/secrets/passwd
+sudo echo 'pacemaker' >> /var/opt/mssql/secrets/passwd
+sudo echo 'Oracle123' >> /var/opt/mssql/secrets/passwd
+sudo chown root:root /var/opt/mssql/secrets/passwd 
+sudo chmod 600 /var/opt/mssql/secrets/passwd
+
+#On both cluster nodes, open the Pacemaker firewall ports. To open these ports with firewalld, run the following command:
+sudo firewall-cmd --permanent --add-service=high-availability
+sudo firewall-cmd --reload
+
+#If you're using another firewall that doesn't have a built-in high-availability configuration, the following ports need to be opened for Pacemaker to be able to communicate with other nodes in the cluster
+
+TCP: Ports 2224, 3121, 21064
+UDP: Port 5405
+
+#Add port 2224 in OCI to access pacemaker GUI
+
+#Install the FCI resource agent for SQL Server. Run the following commands on both nodes.
+sudo curl -o /etc/yum.repos.d/mssql-server.repo https://packages.microsoft.com/config/rhel/8/mssql-server-2019.repo
+sudo yum install mssql-server-ha
+
+#Access the pacemaker application from the GUI using the user hacluster and finish adding 2 resources to the cluster:
+- *delay de 10s
+- serviço do mssql
+
+#Remembering to put in the dependency order as follows:
+ 
+SQL_MASTER
+SQL_DATA
+SQL_LOG
+*SQL-Delay
+SQL-Service
+VIP
+
+*optional
+
+######################################################################
+FFFFFFFFFFFFFFFFFFFFFF    IIIIIIIIII   MMMMMMMM               MMMMMMMM
+F::::::::::::::::::::F    I::::::::I   M:::::::M             M:::::::M
+F::::::::::::::::::::F    I::::::::I   M::::::::M           M::::::::M
+FF::::::FFFFFFFFF::::F    II::::::II   M:::::::::M         M:::::::::M
+  F:::::F       FFFFFF      I::::I     M::::::::::M       M::::::::::M
+  F:::::F                   I::::I     M:::::::::::M     M:::::::::::M
+  F::::::FFFFFFFFFF         I::::I     M:::::::M::::M   M::::M:::::::M
+  F:::::::::::::::F         I::::I     M::::::M M::::M M::::M M::::::M
+  F:::::::::::::::F         I::::I     M::::::M  M::::M::::M  M::::::M
+  F::::::FFFFFFFFFF         I::::I     M::::::M   M:::::::M   M::::::M
+  F:::::F                   I::::I     M::::::M    M:::::M    M::::::M
+  F:::::F                   I::::I     M::::::M     MMMMM     M::::::M
+FF:::::::FF               II::::::II   M::::::M               M::::::M
+F::::::::FF               I::::::::I   M::::::M               M::::::M
+F::::::::FF               I::::::::I   M::::::M               M::::::M
+FFFFFFFFFFF               IIIIIIIIII   MMMMMMMM               MMMMMMMM
+######################################################################
