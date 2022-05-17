@@ -60,7 +60,6 @@ sudo tar xvf home-oracle-oci-folder_backup.tar.gz -C /home
 yum update -y
 reboot
 
-
 #Installing the packages... - (on both nodes)
 sudo yum install pacemaker pcs sbd fence-agents-all resource-agents -y
 --- To see if user is created
@@ -195,11 +194,9 @@ pcs constraint location fence-sbd-node1 prefers node2=0
 pcs constraint location fence-sbd-node2 prefers node1=0
 pcs constraint location fence-sbd-node2 prefers node2="-INFINITY"
 
-
 #Do the test fencing the centos-1 (will reboot)
 pcs stonith fence node1
 pcs stonith history cleanup
-
 
 #Create the disk resources in the cluster
 mkdir -p /SQL_DATA /SQL_LOG /var/opt/mssql/data
@@ -238,7 +235,6 @@ then
 fi
 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 chmod +x /var/lib/pacemaker/ip_move.sh
-
 
 #Creating the alert to move the VIP
 touch /var/log/pacemaker_ip_move.log
@@ -295,8 +291,6 @@ pcs resource clear SQL-CLUSTER
 pcs constraint
 
 obs.: move a resource run clean to remove the created constraint
-
-
 
 ###################################################################################################
 Quickstart: Install SQL Server and create a database on Red Hat
